@@ -56,6 +56,33 @@ The pipeline beneath it handles photo ingestion, garment extraction, deduplicati
    Dedup    Dedup    Dedup    Dedup
 ```
 
+## ReAct Agent Flow
+
+![Closet Agent Flow](docs/closet_diagram.png)
+
+### The 6-Step Loop
+
+| Step | Tool | What happens |
+|------|------|-------------|
+| **1. Ask city** | `ask_user_for_city` | "Where are you today?" — extracts city from prompt or asks the user |
+| **2. Get weather** | `get_weather` | Geocodes city → fetches real-time weather from Open-Meteo. **Fresh fetch every session, no cache.** |
+| **3. Ask occasion/style** | `get_style_preferences` | "What's the occasion? Any style preferences?" — parses from prompt or presents options |
+| **4. Check laundry** | `exclude_laundry` | "Anything in the laundry I should exclude?" — user picks items to skip |
+| **5. Query closet** | `query_closet` | Semantic search with all context (weather + style + exclusions) against pgvector embeddings |
+| **6. Compose outfit** | `compose_outfit` | Pick items by slot (top+bottom or dress + shoes), apply pattern clash rules, return recommendation |
+
+After step 6, the loop goes back to step 4 — user can flag laundry, ask for a different style, or say "looks good" to exit.
+
+### Side Loops
+
+**Weather** — Always fetched live from Open-Meteo at the start of each session. No caching. If the user starts a new session later the same day, weather is fetched again (conditions change throughout the day).
+
+**Laundry** — Session-only. `excluded_ids` lives in the `OutfitSession` dataclass in memory, not in Postgres. When the session ends, laundry exclusions are gone. No permanent flag on items. The loop between steps 4→5→6 can repeat as many times as needed — each iteration excludes more items and recommends from what's left.
+
+**Re-rolls** — When the user says "try something different", all items from the current outfit are added to `excluded_ids` + `suggested_ids`, and the agent loops back to step 5 with those exclusions. Same city, weather, and style — just different items.
+
+---
+
 ## Two Systems
 
 ### 1. Batch ETL Pipeline (Offline)
