@@ -205,87 +205,195 @@ Lives in memory only — **not persisted**. Laundry items are forgotten when the
 
 ## How Photo Ingestion Works
 
-### Step 1: Photo Analysis (Gemini Vision)
+### 3 LLM Calls Per Item
 
-Each photo is sent to **Gemini 2.5 Flash** with a structured prompt that extracts per garment:
+Each garment goes through **3 separate LLM/model calls**, each with a distinct purpose:
 
-| Field | Example | Purpose |
-|-------|---------|---------|
-| `category` | tops, bottoms, dresses, shoes | Slot for outfit assembly |
-| `subcategory` | ribbed crew-neck sweater | Specific garment type |
+```
+Photo (person wearing outfit)
+  │
+  │  ┌─────────────────────────────────────────────────┐
+  ├──│  LLM CALL 1: Classification (Gemini Vision)     │
+  │  │  Model: gemini-2.5-flash                        │
+  │  │  Input: Full photo + structured prompt           │
+  │  │  Output: JSON with items[], each with:           │
+  │  │    category, subcategory, color, fabric,         │
+  │  │    weather_suitability, style_vibe, suited_for   │
+  │  │  Cost: ~2-5s per photo                           │
+  │  └─────────────────────────────────────────────────┘
+  │                    │
+  │          ┌─────────┴─────────┐
+  │          │ Per item detected │
+  │          └─────────┬─────────┘
+  │                    │
+  │         ┌──── DEDUP CHECK (Layer 4) ────┐
+  │         │ Embed item text → HNSW search │
+  │         │ If match < 0.15 → SKIP        │──→ duplicate, stop here
+  │         └───────────┬───────────────────┘
+  │                     │ (unique item)
+  │                     │
+  │  ┌─────────────────────────────────────────────────┐
+  ├──│  LLM CALL 2: Garment Image Gen (one-shot)       │
+  │  │  Model: gemini-2.5-flash-image                  │
+  │  │  Input: Full photo + specific item description   │
+  │  │  Prompt: "Extract ONLY this specific top:        │
+  │  │    dark brown knit V-neck sweater.               │
+  │  │    Generate clean product image, white bg,       │
+  │  │    no face — like a Zara product page."          │
+  │  │  Output: Clean PNG of just that garment          │
+  │  │  Cost: ~3-8s per item                            │
+  │  └─────────────────────────────────────────────────┘
+  │                     │
+  │  ┌─────────────────────────────────────────────────┐
+  └──│  LLM CALL 3: Text Description + Embedding       │
+     │  Step A: Build semantic text from metadata       │
+     │    (no LLM — deterministic string concatenation) │
+     │  Step B: Embed with all-MiniLM-L6-v2 (384-dim)  │
+     │    (local model, ~50ms)                          │
+     │  Output: Vector stored in pgvector chunks table  │
+     └─────────────────────────────────────────────────┘
+```
+
+### LLM Call 1: Classification (Gemini Vision)
+
+The photo is sent to **Gemini 2.5 Flash** with a structured prompt. The prompt specifies exactly what to extract per garment — this is the **richest metadata extraction step**:
+
+| Field | Example | Why it matters |
+|-------|---------|----------------|
+| `category` | tops, bottoms, dresses, shoes | Slot assignment for outfit assembly |
+| `subcategory` | ribbed crew-neck sweater | Specificity for dedup + search |
 | `color` | dark brown | Visual identity |
-| `fabric` | chunky knit wool | Weather suitability signal |
-| `weather_suitability` | "warm layer for 0-10C" | Natural language, embeds well |
+| `fabric` | chunky knit wool | **Key weather signal** — knit = warm, linen = breathable |
+| `weather_suitability` | "warm layer for 0-10C" | **Natural language that embeds well** — matches user queries |
 | `style_vibe` | cozy-casual | Aesthetic matching |
 | `suited_for` | coffee run, everyday | Occasion matching |
-| `scene` | park, autumn, casual outing | Context from source photo |
+| `scene` | park, autumn, casual outing | Where the person was wearing this |
 
-### Step 2: Garment Image Generation (Gemini Image Gen)
+The prompt is structured with rules for each category and explicit instructions for fabric detection ("look at the surface texture: knit/ribbed, smooth cotton, silk/satin, denim...").
 
-For each detected item, a **second Gemini call** generates a clean catalog-style product image:
+### LLM Call 2: Garment Image Generation (One-Shot Prompting)
 
-```
-Input:  Full photo of person wearing outfit
-Prompt: "Extract ONLY this specific top: dark brown knit V-neck sweater.
-         Generate a clean product image, laid flat, white background,
-         no face, no person — like a Zara product page."
-Output: Clean PNG of just that garment
-```
-
-The prompt includes the **specific item description from Step 1** so Gemini extracts the right garment when multiple items share a category (e.g. t-shirt + jacket are both "tops").
-
-### Step 3: Semantic Embedding
-
-Each item's metadata is combined into a ~60-word **semantic text**:
+A **separate Gemini call** using `gemini-2.5-flash-image` (image generation model). The critical detail: the prompt includes the **specific item description from Call 1**:
 
 ```
-"dark brown chunky knit wool V-neck sweater. Thick ribbed texture, cozy and warm.
-Weather: warm insulating layer for cool to cold weather 5-15C.
-Style: cozy-casual. Good for: everyday wear, coffee run.
-Best in fall. Worn at: residential, posing outdoors in autumn."
+WITHOUT specific description (old, broken):
+  "Extract ONLY the top from this photo."
+  → Gemini picks randomly when photo has t-shirt + jacket
+
+WITH specific description (current):
+  "Extract ONLY this specific top: brown zip-up athletic jacket
+   with a high collar, made from synthetic fabric."
+  → Gemini targets the exact garment
 ```
 
-This text is embedded with **all-MiniLM-L6-v2** (384 dimensions) and stored in pgvector. At query time, the user's prompt + weather context is embedded and searched against these vectors via HNSW index — **O(1), ~60ms**.
+This **one-shot prompt** produces a clean catalog image — white background, no face, no other clothing. The image is saved as PNG and stored as `image_data` (bytea) in Postgres.
+
+### LLM Call 3: Text Description + Semantic Embedding
+
+This is actually **not an LLM call** — it's two deterministic steps:
+
+**Step A: Build semantic text** — concatenate metadata fields into a ~60-word paragraph:
+
+```python
+# From dedup.py: build_semantic_text()
+"dark brown chunky knit wool V-neck sweater. Thick ribbed texture, cozy.
+ Weather: warm insulating layer for cool to cold weather 5-15C.
+ Style: cozy-casual. Good for: everyday wear, coffee run.
+ Best in fall. Worn at: park, autumn."
+```
+
+This text is designed to **embed well** — it contains the exact kind of language users type when asking for outfits ("warm", "casual", "coffee", "5-15C"). The better this text, the better the search quality.
+
+**Step B: Embed with MiniLM** — the semantic text is encoded into a 384-dimensional vector using `all-MiniLM-L6-v2` (runs locally, ~50ms). The vector is stored in pgvector's `chunks` table with `type='wardrobe_item'` and indexed via HNSW for O(1) approximate nearest neighbor search.
+
+### How Text Embeddings Power Both Search AND Dedup
+
+The same embedding serves two purposes:
+
+```
+                    semantic_text
+                    "dark brown knit sweater..."
+                          │
+                    ┌─────┴─────┐
+                    │  embed()  │  all-MiniLM-L6-v2, 384-dim
+                    └─────┬─────┘
+                          │
+                    384-dim vector
+                          │
+              ┌───────────┴───────────┐
+              │                       │
+        DEDUP (at ingestion)    SEARCH (at query time)
+              │                       │
+     "Does this item already     "What items match
+      exist in my wardrobe?"     'party outfit for 12C NYC'?"
+              │                       │
+     Search chunks WHERE         Search chunks WHERE
+     type='wardrobe_item'        type='wardrobe_item'
+     max_distance=0.15           max_distance=1.5
+              │                       │
+     If match found in           Rank by distance +
+     same category → SKIP        recency penalty → outfit
+```
+
+**Dedup** uses a **tight threshold (0.15)** — items must be ~85% similar to be considered duplicates. This catches "black jersey leggings" ≈ "black slim-fit leggings" but allows "black jersey leggings" ≠ "light blue striped button-up shirt".
+
+**Search** uses a **loose threshold (1.5)** — cast a wide net, then score by distance + recency + style match.
+
+Both use the **same HNSW index** on the same `chunks` table — no separate index or table for dedup.
 
 ---
 
-## 4-Layer Deduplication
+## 4-Layer Deduplication Pipeline
 
-The pipeline prevents duplicate items at four levels, cheapest first:
+Layers are ordered cheapest → most expensive. Each layer catches what the previous ones missed:
 
 ```
-Photo arrives
+Photo arrives in ~/Downloads/wardrobe_inbox/
   │
-  ├─ Layer 1: BURST DEDUP (free)
-  │   Photos within 300s of each other → keep largest file only.
-  │   "PXL_20260215_004920750" and "004922213" (2s apart) → skip one.
+  ├─ Layer 1: BURST DEDUP ──────────────────── Cost: FREE
+  │   Compares timestamps in filenames.
+  │   Photos within 300s of each other → keep largest file.
+  │   "PXL_20260215_004920750" + "004922213" (2s apart) → skip smaller one.
+  │   Catches: rapid shutter, burst mode, similar angles.
   │
-  ├─ Layer 2: PERCEPTUAL HASH (cheap, local)
-  │   8x8 grayscale average-hash → hamming distance ≤ 10 = duplicate.
-  │   Catches visually identical photos with different filenames.
+  ├─ Layer 2: PERCEPTUAL HASH ─────────────── Cost: ~1ms (local PIL)
+  │   Resize to 8x8 grayscale → compute average-hash → hamming distance.
+  │   Threshold: ≤ 10 bits difference = duplicate.
+  │   Catches: same photo saved with different name, re-exports, screenshots.
   │
-  ├─ Layer 3: SOURCE FILE CHECK (1 SQL query)
-  │   Skip if source_file already in Postgres wardrobe table.
-  │   Prevents reprocessing the exact same photo.
+  ├─ Layer 3: SOURCE FILE CHECK ───────────── Cost: 1 SQL query
+  │   SELECT from wardrobe WHERE source_file = ?
+  │   Catches: exact same file dropped in inbox twice.
   │
-  └─ Layer 4: SEMANTIC DEDUP (1 embedding + 1 HNSW search, ~60ms)
-      After Gemini Vision extracts items, embed the item's semantic text
-      and search existing wardrobe_item vectors in the same category.
-      If cosine distance < 0.15 → duplicate.
+  │   ── Layers 1-3 run BEFORE any Gemini API call ──
+  │   ── Layers below run AFTER Gemini Vision (Call 1) ──
+  │
+  └─ Layer 4: SEMANTIC DEDUP ──────────────── Cost: ~60ms (embed + HNSW search)
+      After Vision extracts items, for EACH item:
+        1. Build semantic_text from extracted metadata
+        2. Embed with MiniLM (50ms)
+        3. Search existing wardrobe_item vectors in same category
+        4. If cosine distance < 0.15 → DUPLICATE → skip
 
       "black jersey leggings" ≈ "black slim-fit leggings" → SKIP
-      "black jersey leggings" ≠ "red striped button-up shirt" → ADD
+      "black jersey leggings" ≠ "red striped button-up" → ADD
 
-      This runs BEFORE garment image generation (the expensive step),
-      so duplicates never trigger a Gemini image gen call.
+      Runs BEFORE garment image gen (Call 2) — the most expensive step.
+      Duplicates never trigger a Gemini image generation call.
 ```
 
-| Layer | What it catches | Cost | When |
-|-------|----------------|------|------|
-| Burst | Same outfit, rapid shutter | Free | Before any API call |
-| Hash | Same photo, different name | Local PIL | Before any API call |
-| Source | Same file reprocessed | 1 SQL | Before any API call |
-| Semantic | Same garment across different photos | ~60ms | After Vision, before image gen |
+| Layer | What it catches | Cost | Runs before |
+|-------|----------------|------|-------------|
+| 1. Burst | Same outfit, rapid shutter | Free | Any API call |
+| 2. Hash | Same pixels, different filename | ~1ms | Any API call |
+| 3. Source | Same file reprocessed | 1 SQL | Any API call |
+| 4. Semantic | Same garment across different photos | ~60ms | Image gen (saves ~5s per dup) |
+
+### Why Layer 4 Matters
+
+Layers 1-3 compare **photos**. Layer 4 compares **garments**.
+
+You might own one pair of black leggings but have 5 photos wearing them at different places. Layers 1-3 won't catch this — different photos, different hashes, different filenames. Layer 4 catches it because the *semantic meaning* of "black stretchy jersey leggings" is nearly identical regardless of which photo it came from.
 
 ---
 
