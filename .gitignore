@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+dist/
+build/
+.venv/
+data/wardrobe/tops/
+data/wardrobe/bottoms/
+data/wardrobe/dresses/
+data/wardrobe/shoes/
+data/wardrobe/catalog.json
+.DS_Store
