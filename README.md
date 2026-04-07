@@ -6,7 +6,7 @@ A **single-agent ReAct orchestrator** (Reason → Act → Observe → Reason →
 
 ## Architecture
 
-![Closet Architecture](docs/closet_diagram.png)
+![Closet Architecture](docs/digital_closet_system_design.svg)
 
 **Top lane:** Batch ingestion pipeline, fully offline. Photos enter the inbox, run through three cheap dedup layers (burst → phash → source) before any Gemini call burns money, then hit Gemini Vision for structured classification. Every detected item is turned into semantic text, embedded locally with MiniLM, and gated by the L4 semantic dedup diamond — the critical gate, because it sits before the expensive image-gen call. Duplicates exit and skip the rest. Unique items continue to Gemini image gen and land in Postgres + pgvector as a row containing both the cleaned image bytes and the chunk vector.
 

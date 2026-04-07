@@ -1,0 +1,218 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" viewBox="0 0 680 1180" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      .t { font-size: 14px; fill: #2C2C2A; }
+      .ts { font-size: 12px; fill: #5F5E5A; }
+      .th { font-size: 14px; font-weight: 500; fill: #2C2C2A; }
+      .arr { stroke: #5F5E5A; stroke-width: 1.5; fill: none; }
+      .leader { stroke: #888780; stroke-width: 0.5; stroke-dasharray: 3 3; fill: none; }
+      .c-gray rect, .c-gray polygon { fill: #F1EFE8; stroke: #5F5E5A; }
+      .c-gray text { fill: #2C2C2A; }
+      .c-teal rect, .c-teal polygon { fill: #E1F5EE; stroke: #0F6E56; }
+      .c-teal .th { fill: #085041; }
+      .c-teal .ts { fill: #0F6E56; }
+      .c-purple rect, .c-purple polygon { fill: #EEEDFE; stroke: #534AB7; }
+      .c-purple .th { fill: #3C3489; }
+      .c-purple .ts { fill: #534AB7; }
+      .c-coral rect, .c-coral polygon { fill: #FAECE7; stroke: #993C1D; }
+      .c-coral .th { fill: #712B13; }
+      .c-coral .ts { fill: #993C1D; }
+      .c-amber rect, .c-amber polygon { fill: #FAEEDA; stroke: #854F0B; }
+      .c-amber .th { fill: #633806; }
+      .c-amber .ts { fill: #854F0B; }
+    </style>
+  </defs>
+
+  <rect width="680" height="1180" fill="#FFFFFF"/>
+
+  <!-- =============== BATCH INGESTION LANE (top) =============== -->
+  <g class="c-gray">
+    <rect x="20" y="20" width="640" height="600" rx="16" stroke-width="0.5" fill-opacity="0.4" stroke-dasharray="6 4"/>
+  </g>
+  <text class="th" x="40" y="46">Batch ingestion pipeline (offline)</text>
+  <text class="ts" x="40" y="62">Runs on a folder of photos. Writes to closet DB. No user in the loop.</text>
+
+  <!-- Inbox source -->
+  <g class="c-gray">
+    <rect x="40" y="86" width="180" height="56" rx="8" stroke-width="0.5"/>
+    <text class="th" x="130" y="111" text-anchor="middle">Photo inbox</text>
+    <text class="ts" x="130" y="129" text-anchor="middle">~/Downloads/wardrobe_inbox</text>
+  </g>
+  <line x1="220" y1="114" x2="258" y2="114" class="arr" marker-end="url(#arrow)"/>
+
+  <!-- Layer 1: Burst dedup -->
+  <g class="c-teal">
+    <rect x="260" y="86" width="180" height="56" rx="8" stroke-width="0.5"/>
+    <text class="th" x="350" y="111" text-anchor="middle">L1 burst dedup</text>
+    <text class="ts" x="350" y="129" text-anchor="middle">Filename timestamps, free</text>
+  </g>
+  <line x1="440" y1="114" x2="478" y2="114" class="arr" marker-end="url(#arrow)"/>
+
+  <!-- Layer 2: Hash dedup -->
+  <g class="c-teal">
+    <rect x="480" y="86" width="160" height="56" rx="8" stroke-width="0.5"/>
+    <text class="th" x="560" y="111" text-anchor="middle">L2 phash</text>
+    <text class="ts" x="560" y="129" text-anchor="middle">8x8 grayscale, ~1ms</text>
+  </g>
+
+  <!-- Down arrow from L2 to L3 -->
+  <path d="M 560 142 L 560 165 L 350 165 L 350 188" class="arr" marker-end="url(#arrow)"/>
+
+  <!-- Layer 3: Source check -->
+  <g class="c-teal">
+    <rect x="260" y="188" width="180" height="56" rx="8" stroke-width="0.5"/>
+    <text class="th" x="350" y="213" text-anchor="middle">L3 source check</text>
+    <text class="ts" x="350" y="231" text-anchor="middle">SQL, has this file run?</text>
+  </g>
+  <line x1="350" y1="244" x2="350" y2="278" class="arr" marker-end="url(#arrow)"/>
+
+  <!-- LLM Call 1: Vision classification -->
+  <g class="c-purple">
+    <rect x="220" y="278" width="260" height="64" rx="8" stroke-width="0.5"/>
+    <text class="th" x="350" y="305" text-anchor="middle">Call 1, vision classify</text>
+    <text class="ts" x="350" y="325" text-anchor="middle">gemini-2.5-flash, structured JSON</text>
+  </g>
+  <text class="ts" x="490" y="316">category, color, fabric,</text>
+  <text class="ts" x="490" y="332">weather, vibe, occasion</text>
+
+  <!-- For each item splitter -->
+  <line x1="350" y1="342" x2="350" y2="372" class="arr" marker-end="url(#arrow)"/>
+  <text class="ts" x="358" y="362">for each detected item</text>
+
+  <!-- Build semantic text (deterministic) -->
+  <g class="c-gray">
+    <rect x="220" y="372" width="260" height="56" rx="8" stroke-width="0.5"/>
+    <text class="th" x="350" y="397" text-anchor="middle">Build semantic text</text>
+    <text class="ts" x="350" y="415" text-anchor="middle">Deterministic concatenation</text>
+  </g>
+  <line x1="350" y1="428" x2="350" y2="458" class="arr" marker-end="url(#arrow)"/>
+
+  <!-- Embed with MiniLM -->
+  <g class="c-coral">
+    <rect x="220" y="458" width="260" height="56" rx="8" stroke-width="0.5"/>
+    <text class="th" x="350" y="483" text-anchor="middle">Embed, MiniLM 384-dim</text>
+    <text class="ts" x="350" y="501" text-anchor="middle">Local model, ~50ms</text>
+  </g>
+
+  <!-- Layer 4: Semantic dedup gate (decision) -->
+  <line x1="350" y1="514" x2="350" y2="540" class="arr" marker-end="url(#arrow)"/>
+  <g class="c-amber">
+    <polygon points="350,540 480,580 350,620 220,580" stroke-width="0.5"/>
+    <text class="th" x="350" y="579" text-anchor="middle">L4 semantic dedup</text>
+    <text class="ts" x="350" y="597" text-anchor="middle">HNSW, distance &lt; 0.15</text>
+  </g>
+
+  <!-- Duplicate path (right, exits lane) -->
+  <line x1="480" y1="580" x2="560" y2="580" class="arr" marker-end="url(#arrow)"/>
+  <text class="ts" x="488" y="572">duplicate</text>
+  <g class="c-gray">
+    <rect x="560" y="552" width="100" height="56" rx="8" stroke-width="0.5"/>
+    <text class="th" x="610" y="577" text-anchor="middle">Skip</text>
+    <text class="ts" x="610" y="595" text-anchor="middle">No image gen</text>
+  </g>
+
+  <!-- =============== Unique item path (down out of lane) =============== -->
+  <line x1="350" y1="620" x2="350" y2="660" class="arr" marker-end="url(#arrow)"/>
+  <text class="ts" x="358" y="642">unique item</text>
+
+  <!-- LLM Call 2: Garment image gen -->
+  <g class="c-purple">
+    <rect x="220" y="660" width="260" height="64" rx="8" stroke-width="0.5"/>
+    <text class="th" x="350" y="687" text-anchor="middle">Call 2, garment image gen</text>
+    <text class="ts" x="350" y="707" text-anchor="middle">gemini-2.5-flash-image, one-shot</text>
+  </g>
+  <text class="ts" x="40" y="688">specific item</text>
+  <text class="ts" x="40" y="704">description</text>
+  <text class="ts" x="40" y="720">from Call 1</text>
+  <line x1="120" y1="700" x2="218" y2="700" class="leader"/>
+
+  <line x1="350" y1="724" x2="350" y2="754" class="arr" marker-end="url(#arrow)"/>
+
+  <!-- Persist to closet DB -->
+  <g class="c-coral">
+    <rect x="180" y="754" width="340" height="74" rx="10" stroke-width="0.5"/>
+    <text class="th" x="350" y="781" text-anchor="middle">Persist to closet DB</text>
+    <text class="ts" x="350" y="801" text-anchor="middle">Postgres + pgvector</text>
+    <text class="ts" x="350" y="817" text-anchor="middle">wardrobe row + image bytea + chunk vector</text>
+  </g>
+
+  <!-- =============== HANDOFF LINE =============== -->
+  <line x1="40" y1="858" x2="640" y2="858" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 4"/>
+  <text class="ts" x="350" y="850" text-anchor="middle">Ingestion writes here. Recommendation reads from here.</text>
+
+  <!-- =============== RECOMMENDATION LANE (bottom) =============== -->
+  <g class="c-gray">
+    <rect x="20" y="870" width="640" height="270" rx="16" stroke-width="0.5" fill-opacity="0.4" stroke-dasharray="6 4"/>
+  </g>
+  <text class="th" x="40" y="896">ReAct outfit recommender (online)</text>
+  <text class="ts" x="40" y="912">Single-agent loop. Tool calls in sequence. Detailed in companion diagram.</text>
+
+  <!-- Compact 6-step strip -->
+  <g class="c-purple">
+    <rect x="40" y="932" width="92" height="44" rx="6" stroke-width="0.5"/>
+    <text class="ts" x="86" y="959" text-anchor="middle">1. Ask city</text>
+  </g>
+  <line x1="132" y1="954" x2="146" y2="954" class="arr" marker-end="url(#arrow)"/>
+
+  <g class="c-teal">
+    <rect x="146" y="932" width="92" height="44" rx="6" stroke-width="0.5"/>
+    <text class="ts" x="192" y="954" text-anchor="middle">2. Weather</text>
+    <text class="ts" x="192" y="970" text-anchor="middle">live fetch</text>
+  </g>
+  <line x1="238" y1="954" x2="252" y2="954" class="arr" marker-end="url(#arrow)"/>
+
+  <g class="c-purple">
+    <rect x="252" y="932" width="92" height="44" rx="6" stroke-width="0.5"/>
+    <text class="ts" x="298" y="954" text-anchor="middle">3. Style</text>
+    <text class="ts" x="298" y="970" text-anchor="middle">occasion</text>
+  </g>
+  <line x1="344" y1="954" x2="358" y2="954" class="arr" marker-end="url(#arrow)"/>
+
+  <g class="c-purple">
+    <rect x="358" y="932" width="92" height="44" rx="6" stroke-width="0.5"/>
+    <text class="ts" x="404" y="954" text-anchor="middle">4. Laundry</text>
+    <text class="ts" x="404" y="970" text-anchor="middle">session</text>
+  </g>
+  <line x1="450" y1="954" x2="464" y2="954" class="arr" marker-end="url(#arrow)"/>
+
+  <g class="c-coral">
+    <rect x="464" y="932" width="92" height="44" rx="6" stroke-width="0.5"/>
+    <text class="ts" x="510" y="954" text-anchor="middle">5. Query</text>
+    <text class="ts" x="510" y="970" text-anchor="middle">closet</text>
+  </g>
+  <line x1="556" y1="954" x2="570" y2="954" class="arr" marker-end="url(#arrow)"/>
+
+  <g class="c-coral">
+    <rect x="570" y="932" width="92" height="44" rx="6" stroke-width="0.5"/>
+    <text class="ts" x="616" y="954" text-anchor="middle">6. Compose</text>
+    <text class="ts" x="616" y="970" text-anchor="middle">outfit</text>
+  </g>
+
+  <!-- Read-from-DB arrow (step 5 reaches up) -->
+  <path d="M 510 932 L 510 900 L 350 900 L 350 830" class="arr" marker-end="url(#arrow)" stroke="#993C1D" stroke-dasharray="4 3"/>
+  <text class="ts" x="356" y="884" fill="#993C1D">HNSW search, distance &lt; 1.5</text>
+
+  <!-- Output -->
+  <g class="c-gray">
+    <rect x="180" y="1000" width="340" height="56" rx="8" stroke-width="0.5"/>
+    <text class="th" x="350" y="1025" text-anchor="middle">Recommended outfit</text>
+    <text class="ts" x="350" y="1043" text-anchor="middle">Top, bottom, shoes, optional layer</text>
+  </g>
+  <line x1="350" y1="980" x2="350" y2="998" class="arr" marker-end="url(#arrow)"/>
+
+  <!-- Legend -->
+  <g transform="translate(40, 1080)">
+    <text class="th" x="0" y="0">Legend</text>
+    <rect class="c-purple" x="0" y="14" width="14" height="14" rx="3" stroke="#534AB7" stroke-width="0.5" fill="#EEEDFE"/>
+    <text class="ts" x="22" y="25">Gemini call</text>
+    <rect x="110" y="14" width="14" height="14" rx="3" stroke="#0F6E56" stroke-width="0.5" fill="#E1F5EE"/>
+    <text class="ts" x="132" y="25">Cheap pre-filter or external API</text>
+    <rect x="350" y="14" width="14" height="14" rx="3" stroke="#993C1D" stroke-width="0.5" fill="#FAECE7"/>
+    <text class="ts" x="372" y="25">Embedding or DB</text>
+    <rect x="500" y="14" width="14" height="14" rx="3" stroke="#854F0B" stroke-width="0.5" fill="#FAEEDA"/>
+    <text class="ts" x="522" y="25">Decision gate</text>
+  </g>
+</svg>
