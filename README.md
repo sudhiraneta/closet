@@ -2,7 +2,17 @@
 
 A tool-using **ReAct-style agent** sitting on top of a **batch ETL/indexing pipeline** for wardrobe management and outfit recommendation.
 
-The recommender is a **single-agent orchestrator with tool calls** — not multi-agent. One brain that plans, calls tools (`ask_user`, `get_weather`, `query_closet`), reasons, and outputs. The pipeline beneath it handles photo ingestion, garment extraction, deduplication, and semantic indexing.
+The recommender is a **single-agent orchestrator with tool calls** — not multi-agent. One LLM brain that follows the **Reason → Act (tool call) → Observe → Reason → final answer** loop. The agent's tools are:
+
+| Tool | What it does | When called |
+|------|-------------|-------------|
+| `ask_user_for_city` | Ask the user where they are today | Start of session, if city not in prompt |
+| `get_weather` | Geocode city → fetch real-time weather from Open-Meteo | After city is known |
+| `get_style_preferences` | Ask occasion, style, comfort level | If not provided in the initial prompt |
+| `query_closet` | Semantic search against wardrobe embeddings (pgvector HNSW) | After city + weather + style are locked in |
+| `compose_outfit` | Pick top+bottom or dress, add shoes, apply pattern/recency filters | After search results come back |
+
+The pipeline beneath it handles photo ingestion, garment extraction, deduplication, and semantic indexing — all offline, before the agent ever runs.
 
 ## Architecture
 
@@ -12,32 +22,38 @@ The recommender is a **single-agent orchestrator with tool calls** — not multi
                     [Natural Language]
                     "Party outfit for NYC tonight"
                           |
-                    +-----------+
-                    |   AGENT   |  ReAct loop (reason → act → observe)
-                    |  agent.py |
-                    +-----------+
-                     |    |    |
-            +--------+    |    +--------+
-            |             |             |
-      ask_user()    get_weather()  query_closet()
-      (city, style,  (Open-Meteo)   (pgvector
-       laundry)                      semantic search)
-                                        |
-                               +--------+--------+
-                               |                  |
-                         wardrobe table      chunks table
-                         (Postgres)         (pgvector embeddings)
-                               |
-                    +----------+----------+
-                    |                     |
-              Batch ETL Pipeline     Garment Images
-              (process_inbox_photos)  (Gemini Image Gen)
-                    |
-            +-------+-------+-------+
-            |       |       |       |
-          Layer 1  Layer 2  Layer 3  Layer 4
-          Burst    Hash     Source   Semantic
-          Dedup    Dedup    Dedup    Dedup
+            ┌─────────────────────────────┐
+            │         REACT AGENT         │
+            │                             │
+            │  Reason → Act → Observe     │
+            │     ↓       ↓       ↓       │
+            │  "Need    tool    "Got      │
+            │   weather" call    12C,     │
+            │            ↓      cloudy"   │
+            │         Reason → Act → ...  │
+            └──────┬──────┬──────┬────────┘
+                   │      │      │
+         ┌─────────┤      │      ├─────────┐
+         │         │      │      │         │
+  ask_user_    get_      get_   query_   compose_
+  for_city   weather   style   closet    outfit
+    ()        ()     prefs()    ()        ()
+              │                  │
+              │         ┌────────┴────────┐
+         Open-Meteo     │                 │
+           API     wardrobe table    chunks table
+                    (Postgres)     (pgvector HNSW)
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+        Batch ETL Pipeline     Garment Images
+        (process_inbox_photos)  (Gemini Image Gen)
+              │
+      ┌───────┼───────┼───────┐
+      │       │       │       │
+   Layer 1  Layer 2  Layer 3  Layer 4
+   Burst    Hash     Source   Semantic
+   Dedup    Dedup    Dedup    Dedup
 ```
 
 ## Two Systems
@@ -60,44 +76,103 @@ User prompt → [reason] → tool calls → [observe] → recommend → laundry 
 
 ---
 
-## How the Agent Works
+## How the Agent Works (ReAct Pattern)
 
-The agent (`wardrobe/agent.py`) follows a ReAct pattern with session state:
+The agent (`wardrobe/agent.py`) implements the **ReAct** (Reasoning + Acting) pattern:
+
+```
+                ┌──────────┐
+                │  Reason  │ ← "User said NYC + party. I need weather."
+                └────┬─────┘
+                     │
+                ┌────▼─────┐
+                │   Act    │ ← get_weather("NYC")
+                └────┬─────┘
+                     │
+                ┌────▼─────┐
+                │ Observe  │ ← "12C, partly cloudy"
+                └────┬─────┘
+                     │
+                ┌────▼─────┐
+                │  Reason  │ ← "Cool evening + party = dress + boots"
+                └────┬─────┘
+                     │
+                ┌────▼─────┐
+                │   Act    │ ← query_closet(style="party", weather=12C)
+                └────┬─────┘
+                     │
+                ┌────▼─────┐
+                │ Observe  │ ← [midi sundress, ankle boots]
+                └────┬─────┘
+                     │
+                ┌────▼─────┐
+                │   Act    │ ← compose_outfit() + ask about laundry
+                └──────────┘
+```
+
+### Full Conversation Example
 
 ```
 Turn 1: "I am in NYC for my bday, party outfit please"
-  [Reason]  City = NYC, occasion = party. Need weather.
-  [Act]     get_weather("NYC") → 12C, partly cloudy
-  [Act]     query_closet(style="party", weather=12C) → dress + boots
-  [Observe] Outfit ready.
-  → "Here's what I'd recommend for NYC (12C, partly cloudy):"
-  → Shows: midi sundress + ankle boots
-  → "Is anything in the laundry?"
+
+  [Reason]   Parse prompt → city=NYC, occasion=bday, style=party
+  [Act]      ask_user_for_city → already extracted "NYC" from prompt, skip
+  [Act]      get_weather("NYC") → 12C, partly cloudy
+  [Act]      get_style_preferences → already extracted "party" from prompt, skip
+  [Act]      query_closet(style="party", weather=12C, city="NYC")
+  [Observe]  Search returned: sundress (score 0.31), boots (score 0.38)
+  [Act]      compose_outfit → midi sundress + ankle boots
+  [Output]   "Here's what I'd recommend for NYC (12C, partly cloudy):"
+             → Shows outfit
+             → "Is anything in the laundry?"
 
 Turn 2: "The sundress is in the laundry"
-  [Reason]  Exclude sundress (id:177) for this session.
-  [Act]     query_closet(exclude=[177]) → different dress + sneakers
-  [Observe] New outfit, no sundress.
-  → "Got it — here's an updated outfit:"
-  → Shows: wrap dress + chunky sneakers
 
-Turn 3: "Looks good!"
-  → "You're all set! Have a great day."
-  → Session ends. Laundry exclusions are forgotten.
+  [Reason]   User says sundress is unavailable. Exclude id:177 for this session.
+  [Act]      exclude_laundry([177]) → session.excluded_ids = {177}
+  [Act]      query_closet(exclude={177}) → search again, sundress filtered out
+  [Observe]  Next best: wrap dress (score 0.35) + sneakers (score 0.40)
+  [Act]      compose_outfit → wrap dress + chunky sneakers
+  [Output]   "Got it — here's an updated outfit:"
+             → Shows new outfit (sundress gone, replaced)
+
+Turn 3: "Try something different"
+
+  [Reason]   User wants another option. Exclude current outfit too.
+  [Act]      Add current outfit IDs to excluded → {177, 159, 164}
+  [Act]      query_closet(exclude={177, 159, 164}) → next best items
+  [Act]      compose_outfit → different combination
+  [Output]   "Here's another option:"
+
+Turn 4: "Looks good!"
+
+  [Reason]   User is satisfied.
+  [Output]   "You're all set! Have a great day."
+             → Session ends. All exclusions cleared.
 ```
 
-**Session state** (lives in memory, not persisted):
-- City + weather (fetched once per session)
-- Style/occasion preferences
-- Excluded IDs (laundry — session-only, not permanent)
-- Suggested IDs (everything recommended this session — avoided in re-rolls)
+### Session State
 
-**Tools the agent calls:**
-| Tool | Purpose |
-|------|---------|
-| `tool_get_weather(city)` | Geocode city → fetch real-time weather from Open-Meteo |
-| `tool_query_closet(session)` | Semantic search against wardrobe embeddings, filtered by exclusions |
-| `tool_exclude_laundry(ids)` | Mark items as excluded for this session only |
+Lives in memory only — **not persisted**. Laundry items are forgotten when the session ends.
+
+| State | Scope | Purpose |
+|-------|-------|---------|
+| `city` + `weather` | Fetched once per session | No re-asking, locked in from Turn 1 |
+| `style` / `occasion` | Locked from Turn 1 | Consistent vibe across re-rolls |
+| `excluded_ids` | Session-only | Laundry + rejected outfits. Gone when session ends. |
+| `suggested_ids` | Session-only | Everything recommended. Avoided in re-rolls. |
+| `current_outfit` | Updated each turn | What's currently shown to the user |
+
+### Agent Tools (implemented in `agent.py`)
+
+| Tool | Function | When called |
+|------|----------|-------------|
+| `ask_user_for_city` | Returns city options or parses from prompt | Turn 1, if city not detected |
+| `get_weather(city)` | Geocode → Open-Meteo API → real-time conditions | After city is known |
+| `get_style_preferences` | Returns style options or parses from prompt | Turn 1, if style not detected |
+| `query_closet(session)` | Embed query → pgvector HNSW search → filter by exclusions | Every recommendation turn |
+| `compose_outfit(candidates)` | Pick slots (top+bottom or dress + shoes), pattern clash check | After search results |
+| `exclude_laundry(ids)` | Add to session.excluded_ids (session-only, not permanent) | When user flags laundry items |
 
 ---
 
