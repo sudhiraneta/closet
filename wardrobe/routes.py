@@ -2,14 +2,10 @@
 Wardrobe API Routes — FastAPI router for all wardrobe endpoints.
 """
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import base64
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
@@ -80,6 +76,22 @@ def get_wardrobe_image(item_id: int):
         return Response(status_code=404)
 
     return Response(content=bytes(row["image_data"]), media_type=row["image_mime"])
+
+
+@router.get("/image/{item_id}/card")
+def get_wardrobe_card_image(item_id: int):
+    """Serve a processed card image — trimmed whitespace, padded to 3:4 ratio."""
+    from wardrobe.image_processor import get_processed_image
+
+    data = get_processed_image(item_id)
+    if not data:
+        return Response(status_code=404)
+
+    return Response(
+        content=data,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.post("/outfit")

@@ -1,0 +1,44 @@
+databases:
+  - name: closet-db
+    plan: starter
+    databaseName: closet
+    postgresMajorVersion: 16
+    ipAllowList: []
+
+services:
+  # FastAPI backend
+  - type: web
+    name: closet-api
+    runtime: python
+    plan: starter
+    buildCommand: >
+      pip install torch --index-url https://download.pytorch.org/whl/cpu &&
+      pip install -r requirements.txt &&
+      python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: closet-db
+          property: connectionString
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.12"
+
+  # Next.js frontend
+  - type: web
+    name: closet-frontend
+    runtime: node
+    plan: starter
+    buildCommand: cd frontend && npm install && npm run build
+    startCommand: cd frontend && npx next start -p $PORT
+    envVars:
+      - key: API_URL
+        fromService:
+          name: closet-api
+          type: web
+          property: url
+      - key: NODE_VERSION
+        value: "20"

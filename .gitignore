@@ -9,5 +9,8 @@ data/wardrobe/tops/
 data/wardrobe/bottoms/
 data/wardrobe/dresses/
 data/wardrobe/shoes/
+data/wardrobe/outfits/
 data/wardrobe/catalog.json
 .DS_Store
+frontend/.next/
+frontend/node_modules/
