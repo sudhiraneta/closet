@@ -36,7 +36,9 @@ def needs_embedding(conn) -> bool:
 
 
 def embed_wardrobe(conn):
-    from wardrobe.store import embed_item
+    from wardrobe.dedup import build_semantic_text
+    from memory.vectorstore import VectorStore
+    from memory.chunker import Chunk, _ensure_metadata
 
     items = conn.execute(
         "SELECT id, category, subcategory, color, pattern, season, comfort, "
@@ -45,10 +47,35 @@ def embed_wardrobe(conn):
     ).fetchall()
 
     print(f"Embedding {len(items)} wardrobe items...")
+    # Single VectorStore / model load for all items
+    store = VectorStore()
+
     for item in items:
         item = dict(item)
-        embed_item(item["id"], item)
-        print(f"  [{item['id']}] {item['subcategory']}")
+        pid = item["id"]
+        semantic_text = item.get("semantic_text") or build_semantic_text(item)
+
+        chunk = Chunk(
+            text=semantic_text,
+            metadata=_ensure_metadata({
+                "source": "wardrobe",
+                "conversation_id": f"wardrobe_item_{pid}",
+                "title": f"{item.get('color', '')} {item.get('subcategory', '')}".strip(),
+                "type": "wardrobe_item",
+                "pillar": "SOCIAL",
+                "dimension": "life",
+                "classified": "true",
+            }),
+        )
+        store.ingest([chunk])
+        chunk_id = store._chunk_id(chunk.text, chunk.metadata)
+        conn.execute(
+            "UPDATE wardrobe SET chunk_id = %s, embedded_at = NOW() WHERE id = %s",
+            (chunk_id, pid),
+        )
+        conn.commit()
+        print(f"  [{pid}] {item['subcategory']}")
+
     print("Embedding complete.")
 
 
