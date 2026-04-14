@@ -85,7 +85,8 @@ def export():
     if chunks:
         lines.append("")
         for c in chunks:
-            emb = c["embedding"] if c["embedding"] else "NULL"
+            raw_emb = c["embedding"]
+            emb_sql = f"'{raw_emb}'::vector" if raw_emb else "NULL"
             extra = c["extra"] if isinstance(c["extra"], str) else json.dumps(c["extra"] or {})
 
             def q(v):
@@ -94,15 +95,17 @@ def export():
                 s = str(v).replace("'", "''")
                 return f"'{s}'"
 
+            ts_sql = "NULL" if not c["timestamp"] else q(str(c["timestamp"]))
+            msg_ts_sql = "NULL" if not c["msg_timestamp"] else q(str(c["msg_timestamp"]))
+
             lines.append(
                 f"INSERT INTO chunks (id, content, embedding, source, conversation_id, title, "
                 f"timestamp, msg_timestamp, role, type, pillar, dimension, classified, "
                 f"cluster_id, cluster_label, extra) VALUES ("
                 f"{q(c['id'])}, {q(c['content'])}, "
-                f"{'NULL' if not emb else emb + '::vector'}, "
+                f"{emb_sql}, "
                 f"{q(c['source'])}, {q(c['conversation_id'])}, {q(c['title'])}, "
-                f"{'NULL' if not c['timestamp'] else q(str(c['timestamp']))}, "
-                f"{'NULL' if not c['msg_timestamp'] else q(str(c['msg_timestamp']))}, "
+                f"{ts_sql}, {msg_ts_sql}, "
                 f"{q(c['role'])}, {q(c['type'])}, {q(c['pillar'])}, {q(c['dimension'])}, "
                 f"{str(c['classified']).upper()}, "
                 f"{q(c['cluster_id'])}, {q(c['cluster_label'])}, '{extra}'::jsonb"
