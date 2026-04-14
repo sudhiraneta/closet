@@ -5,10 +5,9 @@ import os
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://sudhirabadugu@localhost:5433/ai_twin",
-)
+_raw = os.environ.get("DATABASE_URL", "postgresql://sudhirabadugu@localhost:5433/ai_twin")
+# psycopg requires postgresql:// scheme; Railway sometimes provides postgres://
+DATABASE_URL = _raw.replace("postgres://", "postgresql://", 1) if _raw.startswith("postgres://") else _raw
 
 _pool: ConnectionPool | None = None
 
