@@ -25,17 +25,3 @@ services:
       - key: PYTHON_VERSION
         value: "3.12"
 
-  # Next.js frontend
-  - type: web
-    name: closet-frontend
-    runtime: node
-    buildCommand: cd frontend && npm install && npm run build
-    startCommand: cd frontend && npx next start -p $PORT
-    envVars:
-      - key: API_HOST
-        fromService:
-          name: closet-api
-          type: web
-          property: host
-      - key: NODE_VERSION
-        value: "20"
