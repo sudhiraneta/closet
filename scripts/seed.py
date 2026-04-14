@@ -6,9 +6,8 @@ Usage:
 Copies wardrobe items (with images) and their chunk embeddings from
 the local Postgres to a remote database. Run once after first deploy.
 
-The remote DATABASE_URL from Render's external connection string
-typically looks like:
-    postgres://user:pass@host.render.com:5432/closet?sslmode=require
+Railway DB URL (find it in Railway dashboard → Postgres plugin → Variables):
+    postgresql://postgres:password@host.railway.app:5432/railway
 """
 
 import sys
