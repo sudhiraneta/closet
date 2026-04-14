@@ -30,9 +30,22 @@ def _run_startup():
 
     def _sql(conn, path):
         print(f"[startup] Running {path.name}...")
-        conn.execute(path.read_text(encoding="utf-8"))
+        sql = path.read_text(encoding="utf-8")
+        # psycopg3 cursor.execute() only accepts one statement at a time.
+        # Split on end-of-line semicolons (each SQL statement in this file is
+        # on its own line), skip comment-only and blank lines.
+        stmts = []
+        for raw in sql.split(";\n"):
+            # Strip leading blank lines and comment lines so a comment
+            # block before a statement doesn't cause it to be skipped.
+            lines = [ln for ln in raw.splitlines() if ln.strip() and not ln.strip().startswith("--")]
+            if not lines:
+                continue
+            stmts.append("\n".join(lines))
+        for stmt in stmts:
+            conn.execute(stmt)
         conn.commit()
-        print(f"[startup]   Done.")
+        print(f"[startup]   Done ({len(stmts)} statements).")
 
     try:
         with get_conn() as conn:

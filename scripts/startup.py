@@ -18,9 +18,16 @@ MIGRATIONS = Path(__file__).parent.parent / "migrations"
 def run_sql_file(conn, path: Path):
     print(f"Running {path.name}...")
     sql = path.read_text(encoding="utf-8")
-    conn.execute(sql)
+    # psycopg3 execute() only handles one statement at a time.
+    stmts = []
+    for raw in sql.split(";\n"):
+        lines = [ln for ln in raw.splitlines() if ln.strip() and not ln.strip().startswith("--")]
+        if lines:
+            stmts.append("\n".join(lines))
+    for stmt in stmts:
+        conn.execute(stmt)
     conn.commit()
-    print(f"  Done.")
+    print(f"  Done ({len(stmts)} statements).")
 
 
 def needs_seed(conn) -> bool:
