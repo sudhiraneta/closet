@@ -1,6 +1,6 @@
 databases:
   - name: closet-db
-    plan: starter
+    plan: basic
     databaseName: closet
     postgresMajorVersion: 16
     ipAllowList: []
@@ -10,7 +10,7 @@ services:
   - type: web
     name: closet-api
     runtime: python
-    plan: starter
+    plan: basic
     buildCommand: >
       pip install torch --index-url https://download.pytorch.org/whl/cpu &&
       pip install -r requirements.txt &&
@@ -31,7 +31,7 @@ services:
   - type: web
     name: closet-frontend
     runtime: node
-    plan: starter
+    plan: basic
     buildCommand: cd frontend && npm install && npm run build
     startCommand: cd frontend && npx next start -p $PORT
     envVars:
