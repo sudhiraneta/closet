@@ -47,9 +47,13 @@ def get_pool() -> ConnectionPool:
     if _pool is None:
         _pool = ConnectionPool(
             DATABASE_URL,
-            min_size=2,
+            min_size=1,
             max_size=10,
+            max_lifetime=300,   # recycle connections every 5 min
+            max_idle=60,        # drop idle connections after 60 s
+            reconnect_timeout=10,
             open=True,
+            check=ConnectionPool.check_connection,
             kwargs={"row_factory": dict_row},
         )
     return _pool
