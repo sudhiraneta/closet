@@ -1,7 +1,9 @@
 """Postgres connection pool singleton."""
 
+import functools
 import os
 
+import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -61,3 +63,20 @@ def get_pool() -> ConnectionPool:
 
 def get_conn():
     return get_pool().connection()
+
+
+def db_retry(fn):
+    """Retry a route handler once when the DB connection dies mid-request.
+
+    Railway sometimes kills TCP/SSL connections. The pool can't prevent this
+    because the connection is valid at borrow-time but dies during query
+    execution. Catching OperationalError and re-running the handler gets a
+    fresh connection from the pool on the second attempt.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except psycopg.OperationalError:
+            return fn(*args, **kwargs)
+    return wrapper

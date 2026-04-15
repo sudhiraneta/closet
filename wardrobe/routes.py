@@ -11,6 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 from config import WARDROBE_DIR
+from db.postgres import db_retry
 
 router = APIRouter(prefix="/wardrobe", tags=["wardrobe"])
 
@@ -23,6 +24,7 @@ def reprocess_wardrobe():
 
 
 @router.get("/items")
+@db_retry
 def get_wardrobe_items(category: str | None = None):
     """Get wardrobe items from Postgres. Optionally filter by category."""
     from db.postgres import get_conn
@@ -63,6 +65,7 @@ def get_wardrobe_items(category: str | None = None):
 
 
 @router.get("/image/{item_id}")
+@db_retry
 def get_wardrobe_image(item_id: int):
     """Serve a wardrobe item image from Postgres."""
     from db.postgres import get_conn
@@ -79,6 +82,7 @@ def get_wardrobe_image(item_id: int):
 
 
 @router.get("/image/{item_id}/card")
+@db_retry
 def get_wardrobe_card_image(item_id: int):
     """Serve a processed card image — trimmed whitespace, padded to 3:4 ratio."""
     from wardrobe.image_processor import get_processed_image
